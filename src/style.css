@@ -771,3 +771,49 @@ dialog::backdrop {
     scroll-behavior: auto !important;
   }
 }
+
+.catalog-status {
+  padding: 16px 0;
+  color: #c1c8b3;
+  font-size: 13px;
+}
+.catalog-status button,
+.episodes small button {
+  text-decoration: underline;
+  color: #d6f77f;
+}
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 36px 0;
+}
+.episodes select {
+  display: block;
+  max-width: 360px;
+  background: #23262d;
+  color: #eee;
+  border: 1px solid #434952;
+  border-radius: 5px;
+  padding: 10px;
+  margin-top: 8px;
+  font: inherit;
+}
+.episodes label:last-of-type {
+  flex: 1;
+}
+.episodes label:last-of-type select {
+  width: 100%;
+}
+footer a {
+  color: #c9d8a9;
+}
+@media (max-width: 560px) {
+  .episodes {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .episodes select {
+    max-width: 100%;
+    width: 100%;
+  }
+}

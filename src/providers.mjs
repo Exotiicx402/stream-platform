@@ -20,7 +20,7 @@ export function playerUrl(
     throw new Error("Invalid player selection");
   if (
     !Number.isSafeInteger(season) ||
-    season < 1 ||
+    season < 0 ||
     !Number.isSafeInteger(episode) ||
     episode < 1
   )

@@ -17,22 +17,28 @@ import { catalog, type Title } from "./catalog";
 import { providers, playerUrl, readProgress } from "./providers.mjs";
 import { supabase } from "./backend";
 import "./style.css";
+import { useCatalog, titleKey, legacyKey, catalogRequest } from "./useCatalog";
 type HistoryItem = {
   id: number;
+  kind?: "movie" | "tv";
   season: number;
   episode: number;
   position: number;
   duration: number;
   updated: number;
 };
-type Library = { saved: number[]; history: HistoryItem[] };
+type Library = { saved: (number | string)[]; history: HistoryItem[] };
 const empty: Library = { saved: [], history: [] };
 function readLibrary(key: string): Library {
   try {
     const v = JSON.parse(localStorage.getItem(key) || "null");
     return v && Array.isArray(v.saved) && Array.isArray(v.history)
       ? {
-          saved: v.saved.filter((id: unknown) => Number.isSafeInteger(id)),
+          saved: v.saved.filter(
+            (id: unknown) =>
+              Number.isSafeInteger(id) ||
+              (typeof id === "string" && /^(movie|tv):[1-9]\d*$/.test(id)),
+          ),
           history: v.history.filter(
             (h: HistoryItem) =>
               h &&
@@ -126,13 +132,19 @@ function App() {
       return () => clearTimeout(timer);
     }
   }, [library, key, user, ready, loadedKey, remoteReady]);
-  const save = (id: number) =>
+  const isSaved = (t: Title) =>
+    library.saved.some((ref) => legacyKey(ref) === titleKey(t));
+  const save = (t: Title) => {
+    if (!ready || loadedKey !== key) return;
     setLibrary((l) => ({
       ...l,
-      saved: l.saved.includes(id)
-        ? l.saved.filter((x) => x !== id)
-        : [...l.saved, id],
+      saved: l.saved.some((ref) => legacyKey(ref) === titleKey(t))
+        ? l.saved.filter((ref) => legacyKey(ref) !== titleKey(t))
+        : [...l.saved, titleKey(t)],
     }));
+  };
+  const historyKey = (h: HistoryItem) =>
+    h.kind ? `${h.kind}:${h.id}` : legacyKey(h.id);
   const progress = (item: HistoryItem) =>
     setLibrary((l) => ({
       ...l,
@@ -141,7 +153,7 @@ function App() {
         ...l.history.filter(
           (h) =>
             !(
-              h.id === item.id &&
+              historyKey(h) === historyKey(item) &&
               h.season === item.season &&
               h.episode === item.episode
             ),
@@ -152,14 +164,15 @@ function App() {
     setSelected(t);
     setPlaying(play);
   };
-  const titles = catalog.filter(
-    (t) =>
-      (!query ||
-        `${t.name} ${t.genre}`.toLowerCase().includes(query.toLowerCase())) &&
-      (filter === "All" || t.kind === (filter === "Movies" ? "movie" : "tv")) &&
-      (view !== "My list" || library.saved.includes(t.id)) &&
-      (view !== "History" || library.history.some((h) => h.id === t.id)),
-  );
+  const refs = [
+    ...new Set(
+      view === "History"
+        ? library.history.map(historyKey)
+        : library.saved.map(legacyKey),
+    ),
+  ];
+  const { titles, loading, error, total, hasMore, loadMore, retry } =
+    useCatalog(view, query, filter, refs);
   const feature = catalog[0];
   return (
     <>
@@ -222,12 +235,8 @@ function App() {
                   <Play size={18} fill="currentColor" />
                   Watch now
                 </button>
-                <button className="secondary" onClick={() => save(feature.id)}>
-                  {library.saved.includes(feature.id) ? (
-                    <Check size={18} />
-                  ) : (
-                    <Plus size={18} />
-                  )}
+                <button className="secondary" onClick={() => save(feature)}>
+                  {isSaved(feature) ? <Check size={18} /> : <Plus size={18} />}
                   My list
                 </button>
                 <button className="text-button" onClick={() => open(feature)}>
@@ -236,7 +245,7 @@ function App() {
               </div>
             </div>
             <span className="hero-caption">
-              01 / 08 <span>CURATED STARTER COLLECTION</span>
+              <span>EDITOR’S PICK · EXPLORE THE FULL CATALOG BELOW</span>
             </span>
           </section>
         )}
@@ -298,7 +307,7 @@ function App() {
                 <Search size={18} />
                 <input
                   aria-label="Search titles"
-                  placeholder="Search titles, genres…"
+                  placeholder="Search movies and TV shows…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -322,18 +331,32 @@ function App() {
                   {f}
                 </button>
               ))}
-              <span>{titles.length} titles · starter catalog</span>
+              <span>
+                {loading && !titles.length
+                  ? "Loading catalog…"
+                  : `${titles.length} loaded · ${total.toLocaleString()} results`}
+              </span>
             </div>
-            <div className="grid">
+            {error && (
+              <div className="catalog-status" role="alert">
+                {error} <button onClick={retry}>Try again</button>
+              </div>
+            )}
+            {loading && (
+              <p className="catalog-status" role="status">
+                Loading titles…
+              </p>
+            )}
+            <div className="grid" aria-busy={loading}>
               {titles.map((t) => (
-                <article className="card" key={t.id}>
+                <article className="card" key={titleKey(t)}>
                   <button
                     className="poster"
                     onClick={() => open(t)}
                     aria-label={`View ${t.name}`}
                   >
                     <img
-                      src={t.poster}
+                      src={t.poster || undefined}
                       alt=""
                       loading="lazy"
                       onError={(e) => (e.currentTarget.style.opacity = "0")}
@@ -353,27 +376,24 @@ function App() {
                         {t.name}
                       </button>
                       <p>
-                        {t.year} <span>·</span> {t.genre}
+                        {t.year || "—"} <span>·</span> {t.genre}
                       </p>
                     </div>
                     <button
                       className="save"
                       disabled={!ready}
-                      aria-label={`${library.saved.includes(t.id) ? "Remove" : "Save"} ${t.name}`}
-                      onClick={() => save(t.id)}
+                      aria-label={`${isSaved(t) ? "Remove" : "Save"} ${t.name}`}
+                      onClick={() => save(t)}
                     >
-                      {library.saved.includes(t.id) ? (
-                        <Check size={18} />
-                      ) : (
-                        <Plus size={18} />
-                      )}
+                      {isSaved(t) ? <Check size={18} /> : <Plus size={18} />}
                     </button>
                   </div>
                   {view === "History" && (
                     <small>
                       {Math.floor(
-                        (library.history.find((h) => h.id === t.id)?.position ||
-                          0) / 60,
+                        (library.history.find(
+                          (h) => historyKey(h) === titleKey(t),
+                        )?.position || 0) / 60,
                       )}{" "}
                       minutes in
                     </small>
@@ -381,7 +401,18 @@ function App() {
                 </article>
               ))}
             </div>
-            {!titles.length && (
+            {hasMore && !error && (
+              <div className="load-more">
+                <button
+                  className="secondary"
+                  disabled={loading}
+                  onClick={loadMore}
+                >
+                  {loading ? "Loading…" : "Load more titles"}
+                </button>
+              </div>
+            )}
+            {!titles.length && !loading && !error && (
               <div className="empty">
                 <Bookmark size={32} />
                 <h3>
@@ -391,7 +422,7 @@ function App() {
                 </h3>
                 <p>
                   {query
-                    ? "Try another title or genre."
+                    ? "Try another movie or show title."
                     : "Save a title or start watching to see it here."}
                 </p>
                 <button
@@ -410,8 +441,19 @@ function App() {
       </main>
       <footer>
         <span className="brand">stream.</span>
-        <p>An early look at your new home for entertainment.</p>
-        <span>Working name · Alpha 0.1</span>
+        <p>
+          Catalog by{" "}
+          <a
+            href="https://www.themoviedb.org/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            TMDB
+          </a>
+          . This product uses the TMDB API but is not endorsed or certified by
+          TMDB.
+        </p>
+        <span>Working name · Alpha 0.2</span>
       </footer>
       {notice && (
         <div className="toast" role="status">
@@ -427,12 +469,15 @@ function App() {
       {selected && (
         <Modal onClose={() => setSelected(null)} label={selected.name}>
           <Player
+            key={titleKey(selected)}
             title={selected}
             playing={playing}
             setPlaying={setPlaying}
-            saved={library.saved.includes(selected.id)}
-            onSave={() => save(selected.id)}
-            history={library.history.filter((h) => h.id === selected.id)}
+            saved={isSaved(selected)}
+            onSave={() => save(selected)}
+            history={library.history.filter(
+              (h) => historyKey(h) === titleKey(selected),
+            )}
             onProgress={progress}
           />
         </Modal>
@@ -546,9 +591,76 @@ function Player({
 }) {
   const latest = history[0];
   const [provider, setProvider] = useState("vidlink"),
-    [season, setSeason] = useState(latest?.season || 1),
+    [season, setSeason] = useState(latest?.season ?? 1),
     [episode, setEpisode] = useState(latest?.episode || 1),
     [attempt, setAttempt] = useState(0);
+  const [seasons, setSeasons] = useState<{ number: number; name: string }[]>(
+    [],
+  );
+  const [episodes, setEpisodes] = useState<{ number: number; name: string }[]>(
+    [],
+  );
+  const [episodesLoading, setEpisodesLoading] = useState(title.kind === "tv");
+  const [episodeError, setEpisodeError] = useState("");
+  const [metadataRetry, setMetadataRetry] = useState(0);
+  useEffect(() => {
+    if (title.kind !== "tv") return;
+    const controller = new AbortController();
+    catalogRequest(
+      { action: "detail", kind: "tv", id: String(title.id) },
+      controller.signal,
+    )
+      .then((data) => {
+        setSeasons(data.seasons);
+        if (
+          data.seasons.length &&
+          !data.seasons.some((s: { number: number }) => s.number === season)
+        ) {
+          setSeason(data.seasons[0].number);
+          setEpisode(1);
+        }
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) {
+          setEpisodeError(e.message);
+          setEpisodesLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [title.id, metadataRetry]);
+  useEffect(() => {
+    if (title.kind !== "tv") return;
+    const controller = new AbortController();
+    setEpisodesLoading(true);
+    setEpisodeError("");
+    setEpisodes([]);
+    catalogRequest(
+      {
+        action: "season",
+        kind: "tv",
+        id: String(title.id),
+        season: String(season),
+      },
+      controller.signal,
+    )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setEpisodes(data.episodes);
+        if (
+          data.episodes.length &&
+          !data.episodes.some((e: { number: number }) => e.number === episode)
+        )
+          setEpisode(data.episodes[0].number);
+        setEpisodesLoading(false);
+      })
+      .catch((e) => {
+        if (!controller.signal.aborted) {
+          setEpisodeError(e.message);
+          setEpisodesLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [title.id, season, metadataRetry]);
   const frame = useRef<HTMLIFrameElement>(null),
     last = useRef(0);
   const onProgressRef = useRef(onProgress);
@@ -576,6 +688,7 @@ function Player({
         last.current = Date.now();
         onProgressRef.current({
           id: title.id,
+          kind: title.kind,
           season,
           episode,
           ...progress,
@@ -629,37 +742,50 @@ function Player({
           <div className="episodes">
             <label>
               Season
-              <input
-                type="number"
-                min="1"
-                max="100"
+              <select
+                aria-label="Season"
                 value={season}
+                disabled={!seasons.length}
                 onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (Number.isSafeInteger(n) && n > 0 && n <= 100) {
-                    setSeason(n);
-                    setEpisode(1);
-                  }
+                  setPlaying(false);
+                  setSeason(Number(e.target.value));
+                  setEpisode(1);
                 }}
-              />
+              >
+                {seasons.map((s) => (
+                  <option key={s.number} value={s.number}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Episode
-              <input
-                type="number"
-                min="1"
-                max="1000"
+              <select
+                aria-label="Episode"
                 value={episode}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (Number.isSafeInteger(n) && n > 0 && n <= 1000)
-                    setEpisode(n);
-                }}
-              />
+                disabled={episodesLoading || !episodes.length}
+                onChange={(e) => setEpisode(Number(e.target.value))}
+              >
+                {episodes.map((e) => (
+                  <option key={e.number} value={e.number}>
+                    {e.number}. {e.name}
+                  </option>
+                ))}
+              </select>
             </label>
-            <small>
-              Enter an existing episode. Availability varies by source.
-            </small>
+            {episodesLoading && <small role="status">Loading episodes…</small>}
+            {episodeError && (
+              <small role="alert">
+                {episodeError}{" "}
+                <button onClick={() => setMetadataRetry((n) => n + 1)}>
+                  Retry
+                </button>
+              </small>
+            )}
+            {!episodesLoading && !episodeError && !episodes.length && (
+              <small>No episodes listed for this season.</small>
+            )}
           </div>
         )}
         <div className="provider-row">

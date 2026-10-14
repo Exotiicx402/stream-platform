@@ -15,9 +15,9 @@ npm run dev
 
 ## Included
 
-- Responsive curated catalog, title/genre search and movie/TV filters.
+- Live TMDB discovery and movie/TV search, with pagination and media filters.
 - Title detail and player dialogs; VidLink, VidFast and Vidy adapters.
-- TV season/episode selection (manual; not yet backed by episode metadata).
+- Real season and episode menus fetched from TMDB.
 - Guest watchlist and compatible-player history persisted locally.
 - Supabase magic-link sign-in and per-user cloud library with row-level security.
 - Rewards information page explicitly marked not launched; no token, payout or eligibility claims.
@@ -33,7 +33,7 @@ npm run dev
 
 ## Product boundaries and next work
 
-This is an alpha with eight curated starter titles, not a live or complete catalog. Next: TMDB API search/discovery with server-side credentials, complete season metadata, provider monitoring and better playback error reporting, followed by the selected rewards design. Artwork and title identifiers reference TMDB; the application is not endorsed by TMDB.
+The catalog uses TMDB discovery/search and fetches metadata on demand. The original eight records are retained only for the editorial hero and migration of old numeric saved IDs. New library references use `movie:id` or `tv:id` to prevent collisions. Search spans TMDB listings; streaming availability is independent of catalog availability. TMDB limits a query to 500 pages; narrowing a search reaches other titles. Next: provider monitoring and better playback error reporting, followed by the selected rewards design. Artwork and title identifiers reference TMDB; the application is not endorsed by TMDB.
 
 Providers run their own remote players and may display advertisements, require interactions or be unavailable. Video does not transit Vercel or Supabase. These providers reject restrictive iframe sandboxing; integration uses ordinary cross-origin iframes. Never give embedded content access to Supabase credentials beyond the already-public key, wallets or account information. Player progress messages are accepted only from the selected iframe and provider origin and are untrusted viewing convenience data, never proof for token rewards.
 
@@ -46,3 +46,11 @@ Library sync is a debounced, last-write-wins document per account; simultaneous 
 - Supabase security advisor: no findings at initial setup.
 - Browser tests: guest save/reload, filters/search, detail dialogs and provider selection. VidLink loaded Breaking Bad S1 E1 with a 58:20 duration and accepted playback.
 - Email delivery/login requires an end-to-end test with a real user. The built-in Supabase email service is still enabled; configure custom SMTP before opening public account registration.
+
+## Catalog API
+
+Set `TMDB_READ_TOKEN` server-side in Vercel and in ignored `.env.local` for local development. Do not prefix it with `VITE_`. `api/catalog.js` permits only fixed discovery/search, title, season and bounded library lookups. It never exposes the upstream token or accepts arbitrary upstream URLs. Responses are cached at Vercel for ten minutes; library batches use private caching. Vite’s development-only middleware serves the same handler locally.
+
+Public routes: `/api/catalog?kind=tv&q=The%20Office`, `/api/catalog?kind=movie&page=2`, `/api/catalog?action=detail&kind=tv&id=2316`, `/api/catalog?action=season&kind=tv&id=2316&season=2`.
+
+Tests also cover request validation, media-ID collisions, result normalization, episode mapping and suppression of upstream credentials in errors.

@@ -19,7 +19,7 @@ test("rejects unknown providers and invalid IDs or episodes", () => {
   for (const call of [
     () => playerUrl("evil", { id: 1, kind: "movie" }),
     () => playerUrl("vidlink", { id: "../../evil", kind: "movie" }),
-    () => playerUrl("vidlink", { id: 1, kind: "tv" }, 0, 2),
+    () => playerUrl("vidlink", { id: 1, kind: "tv" }, -1, 2),
   ])
     assert.throws(call);
 });
